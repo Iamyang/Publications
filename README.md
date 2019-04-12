@@ -1,2 +1,2 @@
 # Publications
-Published papers and related codes
+Published papers and the source code
