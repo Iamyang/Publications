@@ -1,3 +1,93 @@
+------------6.13-------------
+drop table if exists taz_5ring_wgs84;
+ create table taz_5ring_wgs84
+ as	(
+ 		select	id 
+ 				,st_transform(geom,4326)::geometry(Multipolygon,4326) as geom
+ 		from taz_5ring_utm
+ 	);
+ 
+ select FreeGIS_Coordinate_Transform('public','taz_5ring_wgs84','WGS2GCJ');
+ 
+ alter table taz_5ring_wgs84 add column transform_geom_utm geometry(MULTIPOLYGON,32650);
+ update taz_5ring_wgs84
+ set transform_geom_utm=st_transform(transform_geom,32650);
+ 
+alter table taz_5ring_wgs84 add column n_splits integer;
+ update taz_5ring_wgs84
+ set n_splits=cast(st_area(transform_geom_utm)/250000 as integer);
+
+drop table if exists center_point;
+  create table center_point
+  as		(
+  			select st_centroid(st_collect(geom))  as geom
+ 					,tazid
+  					,cluster_id
+  			from	clusters
+  			group 	by	(tazid,cluster_id)	
+  		);
+  
+ drop table if exists voronoi;
+  create table voronoi
+  as		(
+  			select (ST_Dump(ST_VoronoiPolygons(ST_collect(geom),200))).geom  as geom
+ 					,tazid
+  			from	center_point
+  			group 	by	(tazid)	
+  		);
+  
+ drop table if exists voronoi_its;
+  create table voronoi_its
+  as	(
+			select geom
+					,tazid
+			from	(
+						select ST_Intersection(taz.transform_geom_utm, vor.geom)  as geom
+								,taz.id as tazid
+						from	taz_5ring_wgs84 as taz
+						join	voronoi as vor
+						on		taz.id=vor.tazid
+					)a
+			union	
+			select taz.transform_geom_utm as geom
+					,taz.id
+			from	taz_5ring_wgs84 as taz
+			where	taz.n_splits=1
+		
+		);
+ drop table if exists voronoi;		
+
+drop table if exists pts_pair;
+  create table pts_pair
+  as		(
+  			select t1.geom as p1
+  					,t2.geom as p2
+ 					,t1.tazid as p1_taz
+ 					,t2.tazid as p2_taz
+ 					,st_distance(t1.geom,t2.geom) as distance
+  			from	center_point as t1
+ 			join	center_point as t2
+ 			on		t1.geom<t2.geom
+ 			where	st_distance(t1.geom,t2.geom)>1000
+  				
+  		)
+  ;
+ drop table if exists pts_pair_57;
+  create table pts_pair_57
+  as		(
+  			select *
+ 			from pts_pair
+ 			where distance>=5000
+ 			and   distance<7000
+ 		);
+ drop table if exists pts_pair_23;
+  create table pts_pair_23
+  as		(
+  			select *
+ 			from pts_pair
+ 			where distance>=2000
+ 			and   distance<3000
+ 		);
 ------------5.31-------------
 --generate clusters
 drop table if exists clusters;
@@ -11,8 +101,7 @@ drop table if exists clusters;
 								,tazid
 						from 	taz_in_core_area
 					) random_pts
- 		)
- ;
+ 		);
  
 drop table if exists center_point;
  create table center_point
